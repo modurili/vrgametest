@@ -94,10 +94,11 @@ details b{color:var(--ink)}
         <li><b>スティック</b>でパッドを上から叩く。強く叩くほど大きな音と振動</li>
         <li><b>トリガー</b>（左右どちらでも）＝バスドラム</li>
         <li><b>A / X</b>：キットを今の頭の位置に合わせ直す</li>
-        <li><b>右スティック</b>：上下でキットの高さ、左右で前後の距離</li>
-        <li><b>左スティック</b>：上下でスティックの角度、左右で判定タイミング（選曲画面）</li>
+        <li><b>右スティック</b>：上下で曲、左右で難易度（選曲画面）</li>
+        <li><b>左スティック</b>：上下でハイスピード、左右で判定タイミング（選曲画面）</li>
+        <li><b>グリップを押しながらスティック</b>：右＝キットの高さ・距離、左＝スティックの角度</li>
         <li><b>B / Y 長押し</b>：演奏を中断して選曲へ</li>
-        <li>選曲は<b>ドラムで操作</b>：HT/LT で曲、SD で難易度、HH/CY で速さ、FT で BDオート、トリガーでスタート</li>
+        <li>選曲は<b>スティック操作</b>のほか、ドラムを叩いても可：HT/LT で曲、SD で難易度、HH/CY で速さ、FT で BDオート</li>
       </ul>
     </details>
   </div>
@@ -687,9 +688,9 @@ const hands=[0,1].map(i=>{
   const grip=renderer.xr.getControllerGrip(i); scene.add(grip);
   const pivot=new THREE.Group(); grip.add(pivot);
   const stick=makeStick(); pivot.add(stick);
-  const h={i,grip,pivot,stick,source:null,gamepad:null,handed:'',prev:new THREE.Vector3(),hasPrev:false,btn:[],cool:new Float64Array(8).fill(-1e9),lastHit:-1e9,holdB:0,axRep:0};
-  grip.addEventListener('connected',e=>{h.source=e.data;h.gamepad=e.data.gamepad||null;h.handed=e.data.handedness;h.hasPrev=false;h.btn=[];});
-  grip.addEventListener('disconnected',()=>{h.source=null;h.gamepad=null;h.hasPrev=false;});
+  const h={i,grip,pivot,stick,source:null,gamepad:null,handed:'',prev:new THREE.Vector3(),hasPrev:false,btn:[],cool:new Float64Array(8).fill(-1e9),lastHit:-1e9,holdB:0,axRep:0,rep:{x:0,y:0}};
+  grip.addEventListener('connected',e=>{h.source=e.data;h.gamepad=e.data.gamepad||null;h.handed=e.data.handedness;h.hasPrev=false;h.btn=[];screenP.dirty=true;});
+  grip.addEventListener('disconnected',()=>{h.source=null;h.gamepad=null;h.hasPrev=false;screenP.dirty=true;});
   return h;
 });
 function applyStickAngle(){for(const h of hands) h.pivot.rotation.x=settings.stickAngle;}
@@ -895,7 +896,7 @@ function updatePlay(perf){
 /* =========================================================
    input
    ========================================================= */
-let menuStatus='';
+let menuStatus='', lastInput='—';
 let lastMenuAct=new Float64Array(8);
 function menuInput(lane){
   const now=performance.now();
@@ -915,6 +916,7 @@ function menuInput(lane){
 
 function onPadHit(lane,vel,hand,perf){
   ensureAudio();
+  lastInput=LANES[lane].id+(hand>=0?(hand===0?' (0)':' (1)'):''); if(mode==='menu') screenP.dirty=true;
   playDrum(lane,vel);
   padFlash[lane]=Math.min(1,0.35+vel);
   laneFlash[lane]=1;
@@ -944,10 +946,10 @@ function detectHits(h,prev,cur,perf,dt){
     if(vA.y>0&&vA.y<0.35&&vB.y<=0){
       const f=vA.y/(vA.y-vB.y);
       const x=lerp(vA.x,vB.x,f), z=lerp(vA.z,vB.z,f);
-      const R=p.r+0.04;
+      const R=p.r+(mode==='menu'?0.09:0.04);
       if(x*x+z*z<=R*R){
         const vy=(vA.y-vB.y)/dt;
-        if(vy>0.45&&perf-h.cool[p.lane]>70&&perf-h.lastHit>85){
+        if(vy>(mode==='menu'?0.25:0.45)&&perf-h.cool[p.lane]>70&&perf-h.lastHit>85){
           h.cool[p.lane]=perf; h.lastHit=perf;
           onPadHit(p.lane,clamp(vy/3.2,0.2,1),h.i,perf-(1-f)*dt*1000);
           return;
@@ -955,6 +957,12 @@ function detectHits(h,prev,cur,perf,dt){
       }
     }
   }
+}
+function stickStep(h,key,v,dt,interval,fn){
+  if(Math.abs(v)>0.6){
+    h.rep[key]-=dt;
+    if(h.rep[key]<=0){h.rep[key]=interval;fn(v>0?1:-1);menuStatus='';saveSettings();screenP.dirty=true;haptic(h.i,0.2);}
+  } else h.rep[key]=0;
 }
 function updateControllers(perf,dt){
   updatePadMatrices();
@@ -973,15 +981,20 @@ function updateControllers(perf,dt){
     if(by){h.holdB+=dt; if(h.holdB>1.0&&!h.btn[5]){h.btn[5]=true; if(mode==='play'||mode==='failed'){quitSong();toast('演奏を中断しました');} else if(mode==='result') goMenu();}}
     else {h.holdB=0;h.btn[5]=false;}
     const sx=ax[2]||0, sy=ax[3]||0;
-    if(h.handed==='right'){
+    const adj=mode!=='menu'||pressed(1);
+    if(!adj){
+      if(h.handed==='right'){
+        stickStep(h,'y',sy,dt,0.3,d=>{settings.sel=(settings.sel+d+SONGS.length)%SONGS.length;});
+        stickStep(h,'x',sx,dt,0.3,d=>{settings.diff=(settings.diff+d+3)%3;});
+      } else {
+        stickStep(h,'y',sy,dt,0.25,d=>{settings.hs=clamp(settings.hs-d*0.5,1,5);});
+        stickStep(h,'x',sx,dt,0.14,d=>{settings.offset=clamp(settings.offset+d*5,-200,200);});
+      }
+    } else if(h.handed==='right'){
       if(Math.abs(sy)>0.55){settings.heightAdj=clamp(settings.heightAdj-sy*0.2*dt,-0.4,0.4);applyKitLayout();toast(`キットの高さ ${settings.heightAdj>=0?'+':''}${Math.round(settings.heightAdj*100)} cm`);saveSettings();}
       if(Math.abs(sx)>0.55){settings.distAdj=clamp(settings.distAdj+sx*0.2*dt,-0.3,0.4);applyKitLayout();toast(`キットの距離 ${settings.distAdj>=0?'+':''}${Math.round(settings.distAdj*100)} cm`);saveSettings();}
     } else if(h.handed==='left'){
       if(Math.abs(sy)>0.55){settings.stickAngle=clamp(settings.stickAngle-sy*0.9*dt,-1.0,1.0);applyStickAngle();toast(`スティック角度 ${Math.round(settings.stickAngle*57.3)}°`);saveSettings();}
-      if(mode==='menu'&&Math.abs(sx)>0.6){
-        h.axRep-=dt;
-        if(h.axRep<=0){h.axRep=0.14;settings.offset=clamp(settings.offset+(sx>0?5:-5),-200,200);screenP.dirty=true;saveSettings();}
-      } else h.axRep=0;
     }
   }
 }
@@ -1087,13 +1100,18 @@ function drawMenu(){
   ly+=64;
   g.font=`500 22px ${FB}`; g.fillStyle=C_DIM;
   const tips=vr?[
-    'A / X：キット位置リセット　　B / Y 長押し：演奏中断',
-    '右スティック：高さ（上下）・距離（左右）　左スティック：角度（上下）・タイミング（左右）',
+    '右スティック：上下＝曲　左右＝難易度　／　左スティック：上下＝速さ　左右＝タイミング',
+    'トリガー＝スタート　A/X：キット位置リセット　グリップを押しながらスティック：キット調整',
   ]:[
     '叩くキー：A=HH  S=SD  Space=BD  J=HT  K=LT  L=FT  ;=CY　　[ ]：タイミング',
   ];
   for(const t of tips){fitText(g,t,W-80,22,FB,'500');g.fillText(t,40,ly);ly+=34;}
   if(menuStatus){g.font=`700 22px ${FB}`;g.fillStyle='#ff7a85';g.fillText(menuStatus,40,ly+6);}
+  if(vr){
+    const st=hands.map(h=>h.source?(h.handed==='left'?'L':h.handed==='right'?'R':'?')+' OK':'--').join('  ');
+    g.font=`500 20px ${FN}`; g.fillStyle=C_DIM; g.textAlign='left';
+    g.fillText(`CONTROLLER ${st}    LAST INPUT ${lastInput}`,40,H-22);
+  }
 }
 function drawResult(){
   const {g,c}=screenP, W=c.width, H=c.height, R=resultData;
