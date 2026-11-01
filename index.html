@@ -96,7 +96,7 @@ details b{color:var(--ink)}
         <li><b>A / X</b>：キットを今の頭の位置に合わせ直す</li>
         <li><b>右スティック</b>：上下で曲、左右で難易度（選曲画面）</li>
         <li><b>左スティック</b>：上下でハイスピード、左右で判定タイミング（選曲画面）</li>
-        <li><b>グリップを押しながらスティック</b>：右＝キットの高さ・距離、左＝スティックの角度</li>
+        <li><b>スティック押し込み</b>：キット調整モードの入／切（入のあいだ 右＝高さ・距離、左＝スティックの角度）</li>
         <li><b>B / Y 長押し</b>：演奏を中断して選曲へ</li>
         <li>選曲は<b>スティック操作</b>のほか、ドラムを叩いても可：HT/LT で曲、SD で難易度、HH/CY で速さ、FT で BDオート</li>
       </ul>
@@ -896,7 +896,7 @@ function updatePlay(perf){
 /* =========================================================
    input
    ========================================================= */
-let menuStatus='', lastInput='—';
+let menuStatus='', lastInput='—', adjustMode=false;
 let lastMenuAct=new Float64Array(8);
 function menuInput(lane){
   const now=performance.now();
@@ -980,10 +980,14 @@ function updateControllers(perf,dt){
     const by=pressed(5);
     if(by){h.holdB+=dt; if(h.holdB>1.0&&!h.btn[5]){h.btn[5]=true; if(mode==='play'||mode==='failed'){quitSong();toast('演奏を中断しました');} else if(mode==='result') goMenu();}}
     else {h.holdB=0;h.btn[5]=false;}
+    const sc=pressed(3);
+    if(sc&&!h.btn[3]){adjustMode=!adjustMode;toast(adjustMode?'キット調整モード ON（スティック押し込みで戻る）':'キット調整モード OFF');screenP.dirty=true;}
+    h.btn[3]=sc;
     const sx=ax[2]||0, sy=ax[3]||0;
-    const adj=mode!=='menu'||pressed(1);
+    const adj=adjustMode;
     if(!adj){
-      if(h.handed==='right'){
+      if(mode!=='menu'){}
+      else if(h.handed==='right'){
         stickStep(h,'y',sy,dt,0.3,d=>{settings.sel=(settings.sel+d+SONGS.length)%SONGS.length;});
         stickStep(h,'x',sx,dt,0.3,d=>{settings.diff=(settings.diff+d+3)%3;});
       } else {
@@ -1101,7 +1105,7 @@ function drawMenu(){
   g.font=`500 22px ${FB}`; g.fillStyle=C_DIM;
   const tips=vr?[
     '右スティック：上下＝曲　左右＝難易度　／　左スティック：上下＝速さ　左右＝タイミング',
-    'トリガー＝スタート　A/X：キット位置リセット　グリップを押しながらスティック：キット調整',
+    'トリガー＝スタート　A/X：キット位置リセット　スティック押し込み：キット調整モード',
   ]:[
     '叩くキー：A=HH  S=SD  Space=BD  J=HT  K=LT  L=FT  ;=CY　　[ ]：タイミング',
   ];
@@ -1110,7 +1114,7 @@ function drawMenu(){
   if(vr){
     const st=hands.map(h=>h.source?(h.handed==='left'?'L':h.handed==='right'?'R':'?')+' OK':'--').join('  ');
     g.font=`500 20px ${FN}`; g.fillStyle=C_DIM; g.textAlign='left';
-    g.fillText(`CONTROLLER ${st}    LAST INPUT ${lastInput}`,40,H-22);
+    g.fillText(`CONTROLLER ${st}    LAST INPUT ${lastInput}${adjustMode?'    ADJUST MODE':''}`,40,H-22);
   }
 }
 function drawResult(){
